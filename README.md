@@ -1,21 +1,115 @@
-```txt
+# Медицинская CRM для больницы
+
+## Обзор проекта
+
+- **Название**: Hospital CRM
+- **Цель**: единая информационная система для управления клиникой — пациенты,
+  врачи, записи на приём, медицинские карты, анализы, назначения, разграничение
+  прав по ролям и подробная статистика.
+- **Стек**: Hono + TypeScript → Cloudflare Pages/Workers, база **Cloudflare D1**
+  (SQLite), фронтенд на Tailwind (CDN) + vanilla JS.
+- **Ключевые свойства безопасности**: шифрование ПДн и медданных (AES-256-GCM),
+  хеширование паролей (PBKDF2-SHA256, 100k в production), RBAC, CSRF-защита,
+  защита от брутфорса, журнал аудита, security-заголовки.
+
+## URL
+
+- **Локальный превью**: http://localhost:3000 (PM2 + `wrangler pages dev`)
+- **Production**: указывается после деплоя (Cloudflare Pages, BYOK)
+
+## Роли и права (RBAC)
+
+| Роль | Код | Ключевые права |
+|---|---|---|
+| Пациент | `patient` | свои записи, своя карта, свои анализы, самозапись |
+| Врач | `doctor` | пациенты/приёмы/анализы своего отделения, ведение карт, назначения |
+| Зав. отделением | `head` | отделение + статистика отделения + справочники |
+| Главный врач | `chief` | вся клиника, все статистики, управление врачами |
+| Администратор | `admin` | пользователи, роли, аудит, настройки (**без клинических данных**) |
+
+Полная матрица — в `docs/RBAC_MATRIX.md`. Права проверяются на каждом API-маршруте
+(а не только в UI).
+
+## Демо-доступы (после `npm run db:seed`)
+
+| Логин | Пароль | Роль |
+|---|---|---|
+| `admin` | `Admin#2024` | Администратор |
+| `chief` | `Chief#2024` | Главный врач |
+| `head_card` | `Head#2024` | Зав. кардиоотделением |
+| `head_neuro` | `Head#2024` | Зав. неврологическим отделением |
+| `doctor1` | `Doctor#2024` | Врач-кардиолог |
+| `doctor2` | `Doctor#2024` | Врач-терапевт |
+| `doctor3` | `Doctor#2024` | Врач-невролог |
+| `patient1..3` | `Patient#2024` | Пациенты |
+
+> Демо-данные (пациенты, записи, приёмы, анализы) создаются скриптом `seed.sql`.
+> **Смените пароли перед production.**
+
+## Данные и хранилище
+
+- **База**: Cloudflare D1 (SQLite) — единая БД `hospital-crm-db`.
+- **Основные таблицы**: `users`, `roles`, `permissions`, `role_permissions`,
+  `sessions`, `login_attempts`, `audit_log`, `settings`, `patients`, `doctors`,
+  `departments`, `appointments`, `medical_records`, `analysis_types`, `analyses`,
+  `analysis_results`, `prescriptions`.
+- **Шифрование полей**: ПДн пациента (ФИО, дата рождения, телефон, email, адрес,
+  аллергии, СНИЛС и т.д.), жалобы/диагноз/лечение/рекомендации/показатели,
+  результаты и комментарии анализов, назначения.
+- **Поиск по зашифрованному ФИО**: token blind-index (`patients.name_tokens`).
+- Подробности — `docs/DATABASE.md`.
+
+## Пользовательский сценарий
+
+1. Откройте сайт, войдите под демо-логином (кнопки быстрого входа на экране логина).
+2. Панель показывает сводку, соответствующую роли.
+3. В разделах слева: Пациенты/Моя карта, Записи, Приёмы, Анализы, Назначения,
+   Врачи, Отделения, Статистика, Администрирование, Профиль.
+4. Врач: создаёт приёмы, назначает анализы и вводит результаты, выписывает назначения.
+5. Пациент: видит только свои данные, самозапись на приём.
+6. Зав./Главврач: статистика по пациентам и врачам (графики).
+7. Администратор: управляет пользователями, ролями, смотрит журнал аудита.
+
+## Разработка и запуск
+
+```bash
 npm install
-npm run dev
+npm run build
+npm run db:migrate:local   # применить миграции D1 (local)
+npm run db:seed            # демо-данные
+pm2 start ecosystem.config.cjs
+curl http://localhost:3000/api/health
 ```
 
-```txt
-npm run deploy
-```
+Полезные команды: `npm run db:reset`, `npm run db:console:local`,
+`npm run seed:generate` (пересобрать `seed.sql` с реальными PBKDF2-хешами).
 
-[For generating/synchronizing types based on your Worker configuration run](https://developers.cloudflare.com/workers/wrangler/commands/#types):
+## Деплой
 
-```txt
-npm run cf-typegen
-```
+- **Путь**: Cloudflare Pages (BYOK — токен вводится в панели **Deploy** проекта).
+- **Статус**: ⏳ ожидает токена. После добавления токена:
+  ```bash
+  npx wrangler pages project create hospital-crm --production-branch main
+  npm run deploy
+  npx wrangler pages secret put APP_SECRET --project-name hospital-crm
+  npm run db:migrate:prod
+  npm run db:seed   # только для демо; в production пропустите
+  ```
 
-Pass the `CloudflareBindings` as generics when instantiation `Hono`:
+## Ограничения платформы (учтено в архитектуре)
 
-```ts
-// src/index.ts
-const app = new Hono<{ Bindings: CloudflareBindings }>()
-```
+- Нет KV и cron на managed-аккаунте → key-value хранится в таблице `settings` в D1,
+  периодические задачи выполняются лениво при запросе.
+- PBKDF2 в Workerd ограничен **100 000 итераций** (жёсткий предел).
+- Free-план Workers даёт 10 мс CPU/запрос, поэтому в `wrangler.jsonc` задано
+  `PBKDF2_ITERATIONS=25000` (логины укладываются в бюджет). На платном плане
+  поднимите до 100000.
+
+## Документация
+
+- `docs/ARCHITECTURE.md` — архитектура и потоки данных
+- `docs/SECURITY.md` — модель безопасности и шифрование
+- `docs/RBAC_MATRIX.md` — полная матрица ролей и прав
+- `docs/DATABASE.md` — схема БД и модели
+- `docs/API.md` — справочник API
+- `docs/USER_GUIDE.md` — инструкция пользователя
