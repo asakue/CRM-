@@ -14,8 +14,9 @@
 
 ## URL
 
+- **Production**: https://hospital-crm.pages.dev ✅ (работает)
+- **GitHub**: https://github.com/asakue/CRM-
 - **Локальный превью**: http://localhost:3000 (PM2 + `wrangler pages dev`)
-- **Production**: указывается после деплоя (Cloudflare Pages, BYOK)
 
 ## Роли и права (RBAC)
 
@@ -87,14 +88,19 @@ curl http://localhost:3000/api/health
 ## Деплой
 
 - **Путь**: Cloudflare Pages (BYOK — токен вводится в панели **Deploy** проекта).
-- **Статус**: ⏳ ожидает токена. После добавления токена:
-  ```bash
-  npx wrangler pages project create hospital-crm --production-branch main
-  npm run deploy
-  npx wrangler pages secret put APP_SECRET --project-name hospital-crm
-  npm run db:migrate:prod
-  npm run db:seed   # только для демо; в production пропустите
-  ```
+- **Проект Pages**: `hospital-crm` → https://hospital-crm.pages.dev ✅
+- **База D1 (production)**: `hospital-crm-db` (`94fb1eb4-5efc-4aa5-8cb2-3b477048863b`),
+  миграции 0001–0004 применены, демо-данные загружены.
+- **Секрет**: `APP_SECRET` задан через `wrangler pages secret put`.
+- **Статус**: ✅ задеплоено и проверено (health 200, вход и основные разделы работают).
+
+Обновление production:
+
+```bash
+npm run build
+npx wrangler pages deploy dist --project-name hospital-crm
+npx wrangler d1 migrations apply hospital-crm-db --remote   # при новых миграциях
+```
 
 ## Ограничения платформы (учтено в архитектуре)
 
