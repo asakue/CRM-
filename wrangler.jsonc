@@ -8,7 +8,7 @@
     {
       "binding": "DB",
       "database_name": "hospital-crm-db",
-      "database_id": "local-dev-placeholder"
+      "database_id": "94fb1eb4-5efc-4aa5-8cb2-3b477048863b"
     }
   ],
   "vars": {
